@@ -111,14 +111,17 @@ def index():
             post['subject_name'] = subject['name']
             all_posts.append(post)
             
-    # Sortiranje svih objava od najnovije ka najstarijoj prema datumu i vremenu
+    # Sortiranje svih objava od najnovije ka najstarijoj
     all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
+    
+    # Uzimamo samo poslednjih 5 najnovijih obaveštenja
+    latest_posts = all_posts[:5]
     
     return render_template(
         'index.html', 
         subjects=tracked_subjects, 
         available_subjects=available_subjects, 
-        posts=all_posts
+        posts=latest_posts
     )
 
 @app.route('/add', methods=['POST'])
