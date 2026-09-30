@@ -3,7 +3,6 @@ import json
 import requests
 import xml.etree.ElementTree as ET
 from flask import Flask, render_template, request, jsonify
-from datetime import datetime
 
 app = Flask(__name__)
 
@@ -14,7 +13,6 @@ SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
-# Statistička lista popularnih predmeta na forumu (izbegava se spor poziv ka forumu)
 PREDEFINED_SUBJECTS = [
     {"id": 65, "name": "Mehanika 3"},
     {"id": 807, "name": "Računarski alati"},
@@ -66,7 +64,7 @@ def fetch_feed_fast(subject_id):
         if res.status_code == 200:
             root = ET.fromstring(res.content)
             ns = {'atom': 'http://www.w3.org/2005/Atom'}
-            for entry in root.findall('atom:entry', ns)[:3]: # Uzima samo top 3 sa svakog fida
+            for entry in root.findall('atom:entry', ns)[:3]:
                 title = entry.find('atom:title', ns).text
                 link = entry.find('atom:link', ns).attrib.get('href', '#')
                 updated_raw = entry.find('atom:updated', ns).text if entry.find('atom:updated', ns) is not None else ""
@@ -74,12 +72,40 @@ def fetch_feed_fast(subject_id):
                 entries.append({
                     'title': title,
                     'link': link,
-                    'updated': updated_raw[:10] if updated_raw else "",
                     'dt_raw': updated_raw
                 })
     except Exception as e:
         print(f"Error fetching f={subject_id}: {e}")
     return entries
+
+def check_and_notify():
+    tracked = load_subjects()
+    sent_posts = load_sent_posts()
+    all_current_posts = []
+    
+    for subj in tracked:
+        posts = fetch_feed_fast(subj['id'])
+        for p in posts:
+            all_current_posts.append((subj, p))
+            
+    # Ako je fajl prazan (nakon Renderovog restarta), samo ga nečujno popunimo 
+    # postjećim objavama BEZ slanja ikakvih poruka na Telegram!
+    if not sent_posts and all_current_posts:
+        for subj, p in all_current_posts:
+            sent_posts.add(p['link'])
+        save_sent_posts(sent_posts)
+        return
+
+    # Redovna provera: šaljemo obaveštenje samo za ono što je apsolutno novo
+    new_sent = False
+    for subj, p in all_current_posts:
+        if p['link'] not in sent_posts:
+            send_telegram_notification(subj['name'], p['title'], p['link'])
+            sent_posts.add(p['link'])
+            new_sent = True
+            
+    if new_sent:
+        save_sent_posts(sent_posts)
 
 @app.route('/')
 def index():
@@ -92,7 +118,6 @@ def index():
             p['subject_name'] = subj['name']
             all_posts.append(p)
             
-    # Sortiranje po datumu i uzimanje tačno 5 najnovijih
     all_posts.sort(key=lambda x: x['dt_raw'], reverse=True)
     latest = all_posts[:5]
     
@@ -100,22 +125,8 @@ def index():
 
 @app.route('/cron-check')
 def cron_check():
-    tracked = load_subjects()
-    sent_posts = load_sent_posts()
-    new_sent = False
-    
-    for subj in tracked:
-        posts = fetch_feed_fast(subj['id'])
-        if posts:
-            top_post = posts[0] # Proverava samo najnoviju objavu
-            if top_post['link'] not in sent_posts:
-                send_telegram_notification(subj['name'], top_post['title'], top_post['link'])
-                sent_posts.add(top_post['link'])
-                new_sent = True
-                
-    if new_sent:
-        save_sent_posts(sent_posts)
-        
+    # Poziva centralnu bezbednu funkciju za proveru
+    check_and_notify()
     return jsonify({"status": "ok"})
 
 @app.route('/add', methods=['POST'])
