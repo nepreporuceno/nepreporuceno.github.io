@@ -8,7 +8,6 @@ app = Flask(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'tracked_subjects.json')
-SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
@@ -30,20 +29,10 @@ def save_subjects(subjects):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(subjects, f, ensure_ascii=False, indent=2)
 
-def load_sent_posts():
-    if os.path.exists(SENT_FILE):
-        with open(SENT_FILE, 'r', encoding='utf-8') as f:
-            return set(json.load(f))
-    return set()
-
-def save_sent_posts(sent_posts):
-    with open(SENT_FILE, 'w', encoding='utf-8') as f:
-        json.dump(list(sent_posts), f, ensure_ascii=False, indent=2)
-
 def send_telegram_notification(subject_name, title, link):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         return
-    message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori na forumu]({link})"
+    message = f"📌 *Obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori na forumu]({link})"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         'chat_id': TELEGRAM_CHAT_ID,
@@ -78,35 +67,6 @@ def fetch_feed_fast(subject_id):
         print(f"Error fetching f={subject_id}: {e}")
     return entries
 
-def check_and_notify():
-    tracked = load_subjects()
-    sent_posts = load_sent_posts()
-    all_current_posts = []
-    
-    for subj in tracked:
-        posts = fetch_feed_fast(subj['id'])
-        for p in posts:
-            all_current_posts.append((subj, p))
-            
-    # Ako je fajl prazan (nakon Renderovog restarta), samo ga nečujno popunimo 
-    # postjećim objavama BEZ slanja ikakvih poruka na Telegram!
-    if not sent_posts and all_current_posts:
-        for subj, p in all_current_posts:
-            sent_posts.add(p['link'])
-        save_sent_posts(sent_posts)
-        return
-
-    # Redovna provera: šaljemo obaveštenje samo za ono što je apsolutno novo
-    new_sent = False
-    for subj, p in all_current_posts:
-        if p['link'] not in sent_posts:
-            send_telegram_notification(subj['name'], p['title'], p['link'])
-            sent_posts.add(p['link'])
-            new_sent = True
-            
-    if new_sent:
-        save_sent_posts(sent_posts)
-
 @app.route('/')
 def index():
     tracked = load_subjects()
@@ -125,8 +85,15 @@ def index():
 
 @app.route('/cron-check')
 def cron_check():
-    # Poziva centralnu bezbednu funkciju za proveru
-    check_and_notify()
+    tracked = load_subjects()
+    
+    # Uzima najnovije obaveštenje za svaki predmet i odmah šalje na Telegram
+    for subj in tracked:
+        posts = fetch_feed_fast(subj['id'])
+        if posts:
+            top_post = posts[0]
+            send_telegram_notification(subj['name'], top_post['title'], top_post['link'])
+            
     return jsonify({"status": "ok"})
 
 @app.route('/add', methods=['POST'])
