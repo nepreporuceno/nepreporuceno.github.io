@@ -150,25 +150,30 @@ def index():
             post['subject_name'] = subject['name']
             all_posts.append(post)
             
-    # Sortiranje od najnovijih ka najstarijim
+    # Sortiramo objave od najnovijih ka najstarijima
     all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
-    
-    # Uzimamo 5 najnovijih obaveštenja za sajt
     latest_posts = all_posts[:5]
     
-    # PROVERA I SLANJE TELEGRAM NOTIFIKACIJA
+    # Učitavamo istoriju već poslatih obaveštenja
     sent_posts = load_sent_posts()
-    new_sent = False
     
-    for post in latest_posts:
-        if post['link'] not in sent_posts:
-            # Ako je objava nova, šaljemo je na Telegram
-            send_telegram_notification(post['subject_name'], post['title'], post['link'])
+    # AKO JE PRVO POKRETANJE (fajl je prazan):
+    # Zapamti sve trenutne objave da ne bi stigao "spam" sa starim vestima
+    if not sent_posts and latest_posts:
+        for post in latest_posts:
             sent_posts.add(post['link'])
-            new_sent = True
-            
-    if new_sent:
         save_sent_posts(sent_posts)
+    else:
+        # REDOVNA PROVERA: Šalje notifikaciju samo ako je link potpuno nov
+        new_sent = False
+        for post in latest_posts:
+            if post['link'] not in sent_posts:
+                send_telegram_notification(post['subject_name'], post['title'], post['link'])
+                sent_posts.add(post['link'])
+                new_sent = True
+                
+        if new_sent:
+            save_sent_posts(sent_posts)
     
     return render_template(
         'index.html', 
@@ -176,7 +181,6 @@ def index():
         available_subjects=available_subjects, 
         posts=latest_posts
     )
-
 @app.route('/add', methods=['POST'])
 def add_subject():
     data = request.json
