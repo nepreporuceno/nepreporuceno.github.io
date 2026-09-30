@@ -181,6 +181,40 @@ def index():
         available_subjects=available_subjects, 
         posts=latest_posts
     )
+@app.route('/cron-check')
+def cron_check():
+    # Pokreće istu logiku provere kao i početna stranica
+    tracked_subjects = load_subjects()
+    
+    all_posts = []
+    for subject in tracked_subjects:
+        posts = fetch_subject_feed(subject['id'])
+        for post in posts:
+            post['subject_name'] = subject['name']
+            all_posts.append(post)
+            
+    all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
+    latest_posts = all_posts[:5]
+    
+    sent_posts = load_sent_posts()
+    
+    if not sent_posts and latest_posts:
+        for post in latest_posts:
+            sent_posts.add(post['link'])
+        save_sent_posts(sent_posts)
+    else:
+        new_sent = False
+        for post in latest_posts:
+            if post['link'] not in sent_posts:
+                send_telegram_notification(post['subject_name'], post['title'], post['link'])
+                sent_posts.add(post['link'])
+                new_sent = True
+                
+        if new_sent:
+            save_sent_posts(sent_posts)
+            
+    # Vraća izuzetno mali JSON odgovor koji cron-job lako prihvaća
+    return jsonify({"status": "ok", "checked_posts": len(latest_posts)})
 @app.route('/add', methods=['POST'])
 def add_subject():
     data = request.json
