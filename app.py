@@ -5,7 +5,7 @@ import requests
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify
-from datetime import datetime
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -14,37 +14,53 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'tracked_subjects.json')
 SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
 
-# ==========================================
-# OVDE UNESI SVOJE TELEGRAM PODATKE:
-# ==========================================
-TELEGRAM_BOT_TOKEN = 'TVOJ_TELEGRAM_BOT_TOKEN_OVDE'
-TELEGRAM_CHAT_ID = 'TVOJ_CHAT_ID_OVDE'
+# Učitavanje Telegram podataka iz promenljivih okruženja (Render Environment Variables)
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+
 
 def load_subjects():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Greška pri čitanju {DATA_FILE}: {e}")
     return [
         {"id": 65, "name": "Mehanika 3"}
     ]
 
+
 def save_subjects(subjects):
-    with open(DATA_FILE, 'w', encoding='utf-8') as f:
-        json.dump(subjects, f, ensure_ascii=False, indent=2)
+    try:
+        with open(DATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(subjects, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Greška pri snimanju {DATA_FILE}: {e}")
+
 
 def load_sent_posts():
     if os.path.exists(SENT_FILE):
-        with open(SENT_FILE, 'r', encoding='utf-8') as f:
-            return set(json.load(f))
+        try:
+            with open(SENT_FILE, 'r', encoding='utf-8') as f:
+                return set(json.load(f))
+        except Exception as e:
+            print(f"Greška pri čitanju {SENT_FILE}: {e}")
     return set()
 
+
 def save_sent_posts(sent_posts):
-    with open(SENT_FILE, 'w', encoding='utf-8') as f:
-        json.dump(list(sent_posts), f, ensure_ascii=False, indent=2)
+    try:
+        with open(SENT_FILE, 'w', encoding='utf-8') as f:
+            json.dump(list(sent_posts), f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Greška pri snimanju {SENT_FILE}: {e}")
+
 
 def send_telegram_notification(subject_name, title, link):
-    """Šalje poruku na tvoj Telegram profil"""
-    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == 'TVOJ_TELEGRAM_BOT_TOKEN_OVDE':
+    """Šalje obaveštenje na tvoj Telegram profil"""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("TELEGRAM_BOT_TOKEN ili TELEGRAM_CHAT_ID nisu podešeni u Environment Variables!")
         return
         
     message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori obavu na forumu]({link})"
@@ -61,6 +77,7 @@ def send_telegram_notification(subject_name, title, link):
         requests.post(url, json=payload, timeout=5)
     except Exception as e:
         print(f"Greška pri slanju na Telegram: {e}")
+
 
 def get_all_available_subjects():
     url = "https://nastava.mas.bg.ac.rs/nastava/viewforum.php?f=4"
@@ -86,10 +103,11 @@ def get_all_available_subjects():
                         available.append({'id': forum_id, 'name': name})
                         
     except Exception as e:
-        print(f"Greška pri učitavanju predmeta: {e}")
+        print(f"Greška pri učitavanju predmeta sa foruma: {e}")
         
     available.sort(key=lambda x: x['name'])
     return available
+
 
 def parse_iso_date(date_str):
     if not date_str:
@@ -99,6 +117,7 @@ def parse_iso_date(date_str):
         return datetime.fromisoformat(clean_str)
     except Exception:
         return datetime.min
+
 
 def fetch_subject_feed(subject_id):
     url = f"https://nastava.mas.bg.ac.rs/nastava/feed.php?f={subject_id}"
@@ -130,9 +149,10 @@ def fetch_subject_feed(subject_id):
                     'dt_obj': dt_obj
                 })
     except Exception as e:
-        print(f"Greška pri preuzimanju f={subject_id}: {e}")
+        print(f"Greška pri preuzimanju fid-a za f={subject_id}: {e}")
         
     return entries
+
 
 @app.route('/')
 def index():
@@ -146,20 +166,26 @@ def index():
             post['subject_name'] = subject['name']
             all_posts.append(post)
             
-    # Sortiranje od najnovijih ka najstarijim
+    # Sortiramo objave od najnovije ka najstarijoj
     all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
-    
-    # Uzimamo 5 najnovijih obaveštenja za sajt
     latest_posts = all_posts[:5]
     
-    # PROVERA I SLANJE TELEGRAM NOTIFIKACIJA
     sent_posts = load_sent_posts()
     new_sent = False
     
+    # Za poređenje sa trenutnim vremenom
+    now = datetime.now()
+
     for post in latest_posts:
+        # Poveravamo da li je objava nastala u poslednjih 48 sati
+        is_recent = (now - post['dt_obj'].replace(tzinfo=None)) < timedelta(hours=48) if post['dt_obj'] != datetime.min else False
+
         if post['link'] not in sent_posts:
-            # Ako je objava nova, šaljemo je na Telegram
-            send_telegram_notification(post['subject_name'], post['title'], post['link'])
+            if is_recent:
+                # Šaljemo na Telegram samo ako je objava stvarno nova i mlađa od 48h
+                send_telegram_notification(post['subject_name'], post['title'], post['link'])
+            
+            # Svakako beležimo objavu u sent_posts da se ne provera ponovo
             sent_posts.add(post['link'])
             new_sent = True
             
@@ -172,6 +198,7 @@ def index():
         available_subjects=available_subjects, 
         posts=latest_posts
     )
+
 
 @app.route('/add', methods=['POST'])
 def add_subject():
@@ -186,6 +213,7 @@ def add_subject():
         
     return jsonify({"status": "success"})
 
+
 @app.route('/remove', methods=['POST'])
 def remove_subject():
     data = request.json
@@ -196,6 +224,7 @@ def remove_subject():
     save_subjects(subjects)
     
     return jsonify({"status": "success"})
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
