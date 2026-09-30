@@ -198,7 +198,10 @@ def index():
         available_subjects=available_subjects, 
         posts=latest_posts
     )
-
+@app.route('/ping')
+def ping():
+    # Brzi odgovor za cron-job.org da Render ostane budan (vraca odgovor u par milisekundi)
+    return jsonify({"status": "alive", "message": "Pong!"}), 200
 
 @app.route('/add', methods=['POST'])
 def add_subject():
