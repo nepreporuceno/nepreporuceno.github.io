@@ -198,10 +198,39 @@ def index():
         available_subjects=available_subjects, 
         posts=latest_posts
     )
-@app.route('/ping')
-def ping():
-    # Brzi odgovor za cron-job.org da Render ostane budan (vraca odgovor u par milisekundi)
-    return jsonify({"status": "alive", "message": "Pong!"}), 200
+@app.route('/cron')
+def cron_check():
+    # Pokreće istu logiku provere obaveštenja
+    tracked_subjects = load_subjects()
+    all_posts = []
+    
+    for subject in tracked_subjects:
+        posts = fetch_subject_feed(subject['id'])
+        for post in posts:
+            post['subject_name'] = subject['name']
+            all_posts.append(post)
+            
+    all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
+    latest_posts = all_posts[:5]
+    
+    sent_posts = load_sent_posts()
+    new_sent = False
+    now = datetime.now()
+
+    for post in latest_posts:
+        is_recent = (now - post['dt_obj'].replace(tzinfo=None)) < timedelta(hours=48) if post['dt_obj'] != datetime.min else False
+
+        if post['link'] not in sent_posts:
+            if is_recent:
+                send_telegram_notification(post['subject_name'], post['title'], post['link'])
+            sent_posts.add(post['link'])
+            new_sent = True
+            
+    if new_sent:
+        save_sent_posts(sent_posts)
+        
+    # Vraća minimalan JSON odgovor od svega par bajtova
+    return jsonify({"status": "ok", "message": "Check complete"}), 200
 
 @app.route('/add', methods=['POST'])
 def add_subject():
