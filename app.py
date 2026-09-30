@@ -1,8 +1,11 @@
 import os
 import json
+import re
 import requests
 import xml.etree.ElementTree as ET
+from bs4 import BeautifulSoup
 from flask import Flask, render_template, request, jsonify
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -11,8 +14,11 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'tracked_subjects.json')
 SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
 
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+# ==========================================
+# OVDE UNESI SVOJE TELEGRAM PODATKE:
+# ==========================================
+TELEGRAM_BOT_TOKEN = 'TVOJ_TELEGRAM_BOT_TOKEN_OVDE'
+TELEGRAM_CHAT_ID = 'TVOJ_CHAT_ID_OVDE'
 
 def load_subjects():
     if os.path.exists(DATA_FILE):
