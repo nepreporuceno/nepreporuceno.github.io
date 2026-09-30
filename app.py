@@ -18,8 +18,11 @@ SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
 # OVDE UNESI SVOJE TELEGRAM PODATKE:
 # ==========================================
 # Telegram podaci
-TELEGRAM_BOT_TOKEN = '8882941491:AAFjsHXwQm5lazPtBrK1uboVwYpt4ji9uI4'
-TELEGRAM_CHAT_ID = '8002877811'
+import os
+
+# Čita vrednosti iz Render podešavanja, a ne direktno iz koda
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 def load_subjects():
     if os.path.exists(DATA_FILE):
