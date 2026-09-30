@@ -87,14 +87,13 @@ def index():
 def cron_check():
     tracked = load_subjects()
     
-    # Uzima najnovije obaveštenje za svaki predmet i odmah šalje na Telegram
     for subj in tracked:
         posts = fetch_feed_fast(subj['id'])
         if posts:
             top_post = posts[0]
             send_telegram_notification(subj['name'], top_post['title'], top_post['link'])
             
-    return jsonify({"status": "ok"})
+    return "OK", 200
 
 @app.route('/add', methods=['POST'])
 def add_subject():
