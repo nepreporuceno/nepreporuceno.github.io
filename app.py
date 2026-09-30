@@ -67,21 +67,53 @@ def fetch_feed_fast(subject_id):
         print(f"Error fetching f={subject_id}: {e}")
     return entries
 
+from datetime import datetime, timedelta
+
 @app.route('/')
 def index():
-    tracked = load_subjects()
+    tracked_subjects = load_subjects()
+    available_subjects = get_all_available_subjects()
+    
     all_posts = []
-    
-    for subj in tracked:
-        posts = fetch_feed_fast(subj['id'])
-        for p in posts:
-            p['subject_name'] = subj['name']
-            all_posts.append(p)
+    for subject in tracked_subjects:
+        posts = fetch_subject_feed(subject['id'])
+        for post in posts:
+            post['subject_name'] = subject['name']
+            all_posts.append(post)
             
-    all_posts.sort(key=lambda x: x['dt_raw'], reverse=True)
-    latest = all_posts[:5]
+    # Sortiramo objave od najnovijih ka starijim
+    all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
+    latest_posts = all_posts[:5]
     
-    return render_template('index.html', subjects=tracked, available=PREDEFINED_SUBJECTS, posts=latest)
+    sent_posts = load_sent_posts()
+    new_sent = False
+    
+    # Trenutno vreme za poređenje
+    now = datetime.now()
+    
+    for post in latest_posts:
+        # 1. USLOV: Objava mora biti novija od 48 sati da uopšte razmatramo slanje
+        # (Ovo sprečava bot da šalje stare vesti ako se fajl obriše)
+        is_recent = (now - post['dt_obj']) < timedelta(hours=48) if post['dt_obj'] != datetime.min else False
+        
+        if post['link'] not in sent_posts:
+            if is_recent:
+                # Šaljemo na Telegram samo ako je objava sveža
+                send_telegram_notification(post['subject_name'], post['title'], post['link'])
+            
+            # Svakako ga beležimo u poslate da ga više ne uzima u obzir
+            sent_posts.add(post['link'])
+            new_sent = True
+            
+    if new_sent:
+        save_sent_posts(sent_posts)
+    
+    return render_template(
+        'index.html', 
+        subjects=tracked_subjects, 
+        available_subjects=available_subjects, 
+        posts=latest_posts
+    )
 
 @app.route('/cron-check')
 def cron_check():
