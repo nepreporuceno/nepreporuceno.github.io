@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="sr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Notifikacije - Mašinski Fakultet</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .post-card { transition: transform 0.1s ease-in-out; }
+        .post-card:hover { transform: translateY(-2px); }
+    </style>
+</head>
+<body class="py-4">
+    <div class="container">
+        <header class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
+            <h1 class="h3 text-primary m-0">📌 Obaveštenja sa foruma</h1>
+            <button type="button" onclick="location.reload()" class="btn btn-outline-primary btn-sm">🔄 Osveži sadržaj</button>
+        </header>
+
+        <div class="row">
+            <!-- Lijeva kolona: Izbor i upravljanje -->
+            <div class="col-md-4 mb-4">
+                <div class="card shadow-sm">
+                    <div class="card-header bg-primary text-white fw-bold">
+                        Izabrani predmeti
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-group list-group-flush mb-3">
+                            {% for subject in subjects %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                <div>
+                                    <strong>{{ subject.name }}</strong>
+                                    <small class="text-muted d-block">(f={{ subject.id }})</small>
+                                </div>
+                                <button type="button" 
+                                        data-id="{{ subject.id }}" 
+                                        onclick="removeSubject(this.getAttribute('data-id'))" 
+                                        class="btn btn-outline-danger btn-sm">✕</button>
+                            </li>
+                            {% endfor %}
+                        </ul>
+
+                        <hr>
+                        <h6>Dodaj predmet sa foruma:</h6>
+                        <div class="mb-2">
+                            <select id="subjectSelect" class="form-select form-select-sm mb-2" aria-label="Izaberi predmet">
+                                <option value="" selected disabled>-- Izaberi predmet --</option>
+                                {% for subj in available_subjects %}
+                                    <option value="{{ subj.id }}" data-name="{{ subj.name }}">{{ subj.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="button" onclick="addSubjectFromSelect()" class="btn btn-success btn-sm w-100">➕ Dodaj na listu</button>
+                        </div>
+                        <small class="text-muted">
+                            Lista se automatski osvežava sa početne stranice foruma.
+                        </small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Desna kolona: Prikaz objava -->
+            <div class="col-md-8">
+                <h5 class="mb-3">Najnovije objave ({{ posts|length }})</h5>
+                {% if posts %}
+                    {% for post in posts %}
+                    <div class="card mb-3 shadow-sm post-card">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-1">
+                                <span class="badge bg-secondary">{{ post.subject_name }}</span>
+                                <small class="text-muted">{{ post.updated }}</small>
+                            </div>
+                            <h6 class="card-title my-2">
+                                <a href="{{ post.link }}" target="_blank" class="text-decoration-none text-dark fw-bold">
+                                    {{ post.title }}
+                                </a>
+                            </h6>
+                            <a href="{{ post.link }}" target="_blank" class="btn btn-link p-0 text-primary small">Otvori na forumu &rarr;</a>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="alert alert-info">Trenutno nema učitanih objava ili niste dodali nijedan predmet.</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        async function addSubjectFromSelect() {
+            const select = document.getElementById('subjectSelect');
+            const selectedOption = select.options[select.selectedIndex];
+            
+            if (!select.value) {
+                return alert('Molimo vas da izaberete predmet sa liste!');
+            }
+
+            const id = select.value;
+            const name = selectedOption.getAttribute('data-name');
+
+            await fetch('/add', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id, name: name})
+            });
+            location.reload();
+        }
+
+        async function removeSubject(id) {
+            await fetch('/remove', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id: id})
+            });
+            location.reload();
+        }
+    </script>
+</body>
+</html>
