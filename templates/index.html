@@ -3,179 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Notifikacije - Mašinski Fakultet</title>
+    <title>Obaveštenja - Mašinski Fakultet</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { background-color: #f8f9fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .post-card { transition: transform 0.1s ease-in-out; }
-        .post-card:hover { transform: translateY(-2px); }
-    </style>
 </head>
-<body class="py-4">
-    <div class="container">
-        <header class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
-            <h1 class="h3 text-primary m-0">📌 Obaveštenja sa foruma</h1>
-            <div>
-                <button type="button" id="notifyBtn" onclick="requestNotificationPermission()" class="btn btn-outline-warning btn-sm me-2">🔔 Uključi notifikacije</button>
-                <button type="button" onclick="location.reload()" class="btn btn-outline-primary btn-sm">🔄 Osveži sadržaj</button>
-            </div>
-        </header>
+<body class="bg-light py-4">
+    <div class="container" style="max-width: 800px;">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4 class="m-0 text-primary">📌 Obaveštenja sa foruma</h4>
+            <button onclick="location.reload()" class="btn btn-sm btn-outline-primary">🔄 Osveži</button>
+        </div>
 
-        <div class="row">
-            <!-- Lijeva kolona: Izbor i upravljanje -->
-            <div class="col-md-4 mb-4">
-                <div class="card shadow-sm">
-                    <div class="card-header bg-primary text-white fw-bold">
-                        Izabrani predmeti
-                    </div>
-                    <div class="card-body">
-                        <ul class="list-group list-group-flush mb-3">
-                            {% for subject in subjects %}
-                            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
-                                <div>
-                                    <strong>{{ subject.name }}</strong>
-                                    <small class="text-muted d-block">(f={{ subject.id }})</small>
-                                </div>
-                                <button type="button" 
-                                        data-id="{{ subject.id }}" 
-                                        onclick="removeSubject(this.getAttribute('data-id'))" 
-                                        class="btn btn-outline-danger btn-sm">✕</button>
-                            </li>
-                            {% endfor %}
-                        </ul>
+        <div class="row g-4">
+            <!-- Predmeti -->
+            <div class="col-md-5">
+                <div class="card shadow-sm mb-3">
+                    <div class="card-header bg-primary text-white fw-bold">Praćeni predmeti</div>
+                    <ul class="list-group list-group-flush">
+                        {% for s in subjects %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            <span>{{ s.name }}</span>
+                            <button onclick="removeSub({{ s.id }})" class="btn btn-sm btn-outline-danger">✕</button>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
 
-                        <hr>
-                        <h6>Dodaj predmet sa foruma:</h6>
-                        <div class="mb-2">
-                            <select id="subjectSelect" class="form-select form-select-sm mb-2" aria-label="Izaberi predmet">
-                                <option value="" selected disabled>-- Izaberi predmet --</option>
-                                {% for subj in available_subjects %}
-                                    <option value="{{ subj.id }}" data-name="{{ subj.name }}">{{ subj.name }}</option>
-                                {% endfor %}
-                            </select>
-                            <button type="button" onclick="addSubjectFromSelect()" class="btn btn-success btn-sm w-100">➕ Dodaj na listu</button>
-                        </div>
-                        <small class="text-muted">
-                            Lista se automatski osvežava sa početne stranice foruma.
-                        </small>
+                <div class="card shadow-sm p-3">
+                    <h6 class="mb-2">Dodaj predmet (ID sa foruma):</h6>
+                    <div class="input-group input-group-sm mb-2">
+                        <input type="number" id="customId" class="form-control" placeholder="ID (npr. 65)">
+                        <input type="text" id="customName" class="form-control" placeholder="Naziv">
+                        <button onclick="addCustomSub()" class="btn btn-success">+</button>
                     </div>
                 </div>
             </div>
 
-            <!-- Desna kolona: Prikaz objava -->
-            <div class="col-md-8">
+            <!-- Vesti -->
+            <div class="col-md-7">
                 <h5 class="mb-3">Poslednjih 5 obaveštenja</h5>
                 {% if posts %}
-                    {% for post in posts %}
-                    <div class="card mb-3 shadow-sm post-card" data-link="{{ post.link }}" data-title="{{ post.title }}" data-subject="{{ post.subject_name }}">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start mb-1">
-                                <span class="badge bg-secondary">{{ post.subject_name }}</span>
-                                <small class="text-muted">{{ post.updated }}</small>
-                            </div>
-                            <h6 class="card-title my-2">
-                                <a href="{{ post.link }}" target="_blank" class="text-decoration-none text-dark fw-bold">
-                                    {{ post.title }}
-                                </a>
-                            </h6>
-                            <a href="{{ post.link }}" target="_blank" class="btn btn-link p-0 text-primary small">Otvori na forumu &rarr;</a>
+                    {% for p in posts %}
+                    <div class="card shadow-sm mb-2">
+                        <div class="card-body p-3">
+                            <span class="badge bg-secondary mb-1">{{ p.subject_name }}</span>
+                            <h6 class="mb-1"><a href="{{ p.link }}" target="_blank" class="text-dark text-decoration-none fw-bold">{{ p.title }}</a></h6>
+                            <small class="text-muted">{{ p.updated }}</small>
                         </div>
                     </div>
                     {% endfor %}
                 {% else %}
-                    <div class="alert alert-info">Trenutno nema učitanih objava ili niste dodali nijedan predmet.</div>
+                    <div class="alert alert-warning p-2 small">Nema dostupnih objava ili se forum ne odaziva.</div>
                 {% endif %}
             </div>
         </div>
     </div>
 
     <script>
-        async function addSubjectFromSelect() {
-            const select = document.getElementById('subjectSelect');
-            const selectedOption = select.options[select.selectedIndex];
-            
-            if (!select.value) {
-                return alert('Molimo vas da izaberete predmet sa liste!');
-            }
-
-            const id = select.value;
-            const name = selectedOption.getAttribute('data-name');
-
-            await fetch('/add', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: id, name: name})
-            });
+        async function removeSub(id) {
+            await fetch('/remove', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: id})});
             location.reload();
         }
-
-        async function removeSubject(id) {
-            await fetch('/remove', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id: id})
-            });
+        async function addCustomSub() {
+            const id = document.getElementById('customId').value;
+            const name = document.getElementById('customName').value;
+            if(!id || !name) return alert('Unesite ID i naziv!');
+            await fetch('/add', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: id, name: name})});
             location.reload();
         }
-
-        // --- SISTEM NOTIFIKACIJA ---
-
-        function updateNotifyBtnUI() {
-            const btn = document.getElementById('notifyBtn');
-            if (Notification.permission === 'granted') {
-                btn.className = 'btn btn-outline-success btn-sm me-2';
-                btn.innerText = '🔔 Notifikacije aktivne';
-            } else if (Notification.permission === 'denied') {
-                btn.className = 'btn btn-outline-secondary btn-sm me-2';
-                btn.innerText = '🔕 Notifikacije blokirane';
-            }
-        }
-
-        function requestNotificationPermission() {
-            if (!("Notification" in window)) {
-                alert("Vaš pregledač ne podržava notifikacije.");
-                return;
-            }
-            Notification.requestPermission().then(permission => {
-                updateNotifyBtnUI();
-                if (permission === 'granted') {
-                    checkAndShowNewNotifications();
-                }
-            });
-        }
-
-        function checkAndShowNewNotifications() {
-            if (Notification.permission !== 'granted') return;
-
-            const firstPost = document.querySelector('.post-card');
-            if (!firstPost) return;
-
-            const latestLink = firstPost.getAttribute('data-link');
-            const latestTitle = firstPost.getAttribute('data-title');
-            const latestSubject = firstPost.getAttribute('data-subject');
-
-            const lastSeenLink = localStorage.getItem('last_seen_post_link');
-
-            // Ako postoji nova objava koju nismo ranije videli
-            if (lastSeenLink && lastSeenLink !== latestLink) {
-                const notification = new Notification(`Novo obaveštenje: ${latestSubject}`, {
-                    body: latestTitle,
-                    icon: 'https://cdn-icons-png.flaticon.com/512/3602/3602145.png'
-                });
-
-                notification.onclick = function() {
-                    window.open(latestLink, '_blank');
-                };
-            }
-
-            // Zapamti poslednju objavu
-            localStorage.setItem('last_seen_post_link', latestLink);
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            updateNotifyBtnUI();
-            checkAndShowNewNotifications();
-        });
     </script>
 </body>
 </html>
