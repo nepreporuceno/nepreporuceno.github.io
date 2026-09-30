@@ -8,7 +8,18 @@ from flask import Flask, render_template, request, jsonify
 from datetime import datetime
 
 app = Flask(__name__)
-DATA_FILE = 'tracked_subjects.json'
+
+# Putanje do fajlova u istom folderu
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE = os.path.join(BASE_DIR, 'tracked_subjects.json')
+SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
+
+# ==========================================
+# OVDE UNESI SVOJE TELEGRAM PODATKE:
+# ==========================================
+# Telegram podaci
+TELEGRAM_BOT_TOKEN = '8882941491:AAFjsHXwQm5lazPtBrK1uboVwYpt4ji9uI4'
+TELEGRAM_CHAT_ID = '8002877811'
 
 def load_subjects():
     if os.path.exists(DATA_FILE):
@@ -22,10 +33,39 @@ def save_subjects(subjects):
     with open(DATA_FILE, 'w', encoding='utf-8') as f:
         json.dump(subjects, f, ensure_ascii=False, indent=2)
 
+def load_sent_posts():
+    if os.path.exists(SENT_FILE):
+        with open(SENT_FILE, 'r', encoding='utf-8') as f:
+            return set(json.load(f))
+    return set()
+
+def save_sent_posts(sent_posts):
+    with open(SENT_FILE, 'w', encoding='utf-8') as f:
+        json.dump(list(sent_posts), f, ensure_ascii=False, indent=2)
+
+def send_telegram_notification(subject_name, title, link):
+    """Šalje poruku na tvoj Telegram profil"""
+    if not TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN == 'TVOJ_TELEGRAM_BOT_TOKEN_OVDE':
+        return
+        
+    message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori obavu na forumu]({link})"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': message,
+        'parse_mode': 'Markdown',
+        'disable_web_page_preview': False
+    }
+    
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"Greška pri slanju na Telegram: {e}")
+
 def get_all_available_subjects():
-    """Skida stranicu kategorije (f=4) i izvlači sve dostupne predmete/podforume"""
     url = "https://nastava.mas.bg.ac.rs/nastava/viewforum.php?f=4"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     available = []
     seen_ids = set()
 
@@ -47,13 +87,12 @@ def get_all_available_subjects():
                         available.append({'id': forum_id, 'name': name})
                         
     except Exception as e:
-        print(f"Greška pri učitavanju liste predmeta sa f=4: {e}")
+        print(f"Greška pri učitavanju predmeta: {e}")
         
     available.sort(key=lambda x: x['name'])
     return available
 
 def parse_iso_date(date_str):
-    """Prevara ISO 8601 datum iz RSS-a u Python datetime objekat za pouzdano sortiranje"""
     if not date_str:
         return datetime.min
     try:
@@ -82,20 +121,17 @@ def fetch_subject_feed(subject_id):
                 link = link_elem.attrib.get('href', '#') if link_elem is not None else "#"
                 updated_raw = updated_elem.text if updated_elem is not None else ""
                 
-                # Pretvaranje u datetime objekat
                 dt_obj = parse_iso_date(updated_raw)
-                
-                # Lepše formatiran prikaz za korisnika (npr. 30.09.2026. u 14:30)
                 formatted_date = dt_obj.strftime('%d.%m.%Y. u %H:%M') if dt_obj != datetime.min else updated_raw
 
                 entries.append({
                     'title': title,
                     'link': link,
                     'updated': formatted_date,
-                    'dt_obj': dt_obj  # Koristi se za precizno sortiranje
+                    'dt_obj': dt_obj
                 })
     except Exception as e:
-        print(f"Greška pri preuzimanju za f={subject_id}: {e}")
+        print(f"Greška pri preuzimanju f={subject_id}: {e}")
         
     return entries
 
@@ -111,11 +147,25 @@ def index():
             post['subject_name'] = subject['name']
             all_posts.append(post)
             
-    # Sortiranje svih objava od najnovije ka najstarijoj
+    # Sortiranje od najnovijih ka najstarijim
     all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
     
-    # Uzimamo samo poslednjih 5 najnovijih obaveštenja
+    # Uzimamo 5 najnovijih obaveštenja za sajt
     latest_posts = all_posts[:5]
+    
+    # PROVERA I SLANJE TELEGRAM NOTIFIKACIJA
+    sent_posts = load_sent_posts()
+    new_sent = False
+    
+    for post in latest_posts:
+        if post['link'] not in sent_posts:
+            # Ako je objava nova, šaljemo je na Telegram
+            send_telegram_notification(post['subject_name'], post['title'], post['link'])
+            sent_posts.add(post['link'])
+            new_sent = True
+            
+    if new_sent:
+        save_sent_posts(sent_posts)
     
     return render_template(
         'index.html', 
@@ -149,5 +199,4 @@ def remove_subject():
     return jsonify({"status": "success"})
 
 if __name__ == '__main__':
-    print("Sajt je pokrenut na http://127.0.0.1:5000")
     app.run(debug=True, port=5000)
