@@ -15,7 +15,10 @@
     <div class="container">
         <header class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom">
             <h1 class="h3 text-primary m-0">📌 Obaveštenja sa foruma</h1>
-            <button type="button" onclick="location.reload()" class="btn btn-outline-primary btn-sm">🔄 Osveži sadržaj</button>
+            <div>
+                <button type="button" id="notifyBtn" onclick="requestNotificationPermission()" class="btn btn-outline-warning btn-sm me-2">🔔 Uključi notifikacije</button>
+                <button type="button" onclick="location.reload()" class="btn btn-outline-primary btn-sm">🔄 Osveži sadržaj</button>
+            </div>
         </header>
 
         <div class="row">
@@ -61,10 +64,10 @@
 
             <!-- Desna kolona: Prikaz objava -->
             <div class="col-md-8">
-                <h5 class="mb-3">Najnovije objave ({{ posts|length }})</h5>
+                <h5 class="mb-3">Poslednjih 5 obaveštenja</h5>
                 {% if posts %}
                     {% for post in posts %}
-                    <div class="card mb-3 shadow-sm post-card">
+                    <div class="card mb-3 shadow-sm post-card" data-link="{{ post.link }}" data-title="{{ post.title }}" data-subject="{{ post.subject_name }}">
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <span class="badge bg-secondary">{{ post.subject_name }}</span>
@@ -114,6 +117,65 @@
             });
             location.reload();
         }
+
+        // --- SISTEM NOTIFIKACIJA ---
+
+        function updateNotifyBtnUI() {
+            const btn = document.getElementById('notifyBtn');
+            if (Notification.permission === 'granted') {
+                btn.className = 'btn btn-outline-success btn-sm me-2';
+                btn.innerText = '🔔 Notifikacije aktivne';
+            } else if (Notification.permission === 'denied') {
+                btn.className = 'btn btn-outline-secondary btn-sm me-2';
+                btn.innerText = '🔕 Notifikacije blokirane';
+            }
+        }
+
+        function requestNotificationPermission() {
+            if (!("Notification" in window)) {
+                alert("Vaš pregledač ne podržava notifikacije.");
+                return;
+            }
+            Notification.requestPermission().then(permission => {
+                updateNotifyBtnUI();
+                if (permission === 'granted') {
+                    checkAndShowNewNotifications();
+                }
+            });
+        }
+
+        function checkAndShowNewNotifications() {
+            if (Notification.permission !== 'granted') return;
+
+            const firstPost = document.querySelector('.post-card');
+            if (!firstPost) return;
+
+            const latestLink = firstPost.getAttribute('data-link');
+            const latestTitle = firstPost.getAttribute('data-title');
+            const latestSubject = firstPost.getAttribute('data-subject');
+
+            const lastSeenLink = localStorage.getItem('last_seen_post_link');
+
+            // Ako postoji nova objava koju nismo ranije videli
+            if (lastSeenLink && lastSeenLink !== latestLink) {
+                const notification = new Notification(`Novo obaveštenje: ${latestSubject}`, {
+                    body: latestTitle,
+                    icon: 'https://cdn-icons-png.flaticon.com/512/3602/3602145.png'
+                });
+
+                notification.onclick = function() {
+                    window.open(latestLink, '_blank');
+                };
+            }
+
+            // Zapamti poslednju objavu
+            localStorage.setItem('last_seen_post_link', latestLink);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            updateNotifyBtnUI();
+            checkAndShowNewNotifications();
+        });
     </script>
 </body>
 </html>
