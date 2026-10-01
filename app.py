@@ -9,12 +9,12 @@ from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# Putanje do fajlova u istom folderu
+# Putanje do fajlova
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'tracked_subjects.json')
 SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
 
-# Učitavanje Telegram podataka iz promenljivih okruženja (Render Environment Variables)
+# Učitavanje Telegram podataka iz Render Environment Variables
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
@@ -58,12 +58,12 @@ def save_sent_posts(sent_posts):
 
 
 def send_telegram_notification(subject_name, title, link):
-    """Šalje obaveštenje na tvoj Telegram profil"""
+    """Šalje obaveštenje na Telegram profil"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("TELEGRAM_BOT_TOKEN ili TELEGRAM_CHAT_ID nisu podešeni u Environment Variables!")
         return
         
-    message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori obavu na forumu]({link})"
+    message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori obaveštenje]({link})"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
     payload = {
@@ -154,95 +154,133 @@ def fetch_subject_feed(subject_id):
     return entries
 
 
+def fetch_fluidi_posts():
+    """Funkcija za skrejpovanje obaveštenja sa sajta Katedre za fluide"""
+    url = "https://fluidi.mas.bg.ac.rs/mfb/index.html"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    entries = []
+
+    try:
+        response = requests.get(url, headers=headers, timeout=8)
+        response.encoding = 'utf-8'
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            rows = soup.find_all('tr')
+
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    date_text = cols[0].get_text(strip=True)
+                    text_col = cols[1]
+
+                    link_tag = text_col.find('a')
+                    title = text_col.get_text(strip=True)
+                    
+                    if link_tag and link_tag.get('href'):
+                        href = link_tag['href']
+                        if href.startswith('http'):
+                            link = href
+                        else:
+                            link = f"https://fluidi.mas.bg.ac.rs/mfb/{href}"
+                    else:
+                        link = f"{url}#{hash(title)}"
+
+                    dt_obj = datetime.min
+                    match = re.search(r'(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})', date_text)
+                    if match:
+                        day, month, year = match.groups()
+                        if len(year) == 2:
+                            year = "20" + year
+                        try:
+                            dt_obj = datetime(int(year), int(month), int(day))
+                        except ValueError:
+                            dt_obj = datetime.min
+
+                    if title:
+                        entries.append({
+                            'title': title,
+                            'link': link,
+                            'updated': date_text if date_text else 'Sveže',
+                            'dt_obj': dt_obj,
+                            'subject_name': 'Katedra za fluide'
+                        })
+    except Exception as e:
+        print(f"Greška pri preuzimanju vesti sa Fluidi sajta: {e}")
+
+    return entries
+
+
+def process_and_notify():
+    """Zajednička logika za sakupljanje vesti i slanje notifikacija"""
+    tracked_subjects = load_subjects()
+    all_posts = []
+
+    # 1. Obaveštenja sa glavnog foruma
+    for subject in tracked_subjects:
+        posts = fetch_subject_feed(subject['id'])
+        for post in posts:
+            post['subject_name'] = subject['name']
+            all_posts.append(post)
+
+    # 2. Obaveštenja sa sajta Katedre za fluide
+    fluidi_posts = fetch_fluidi_posts()
+    all_posts.extend(fluidi_posts)
+
+    # Sortiranje po datumu
+    all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
+    latest_posts = all_posts[:5]
+
+    # Provera i slanje notifikacija
+    sent_posts = load_sent_posts()
+    new_sent = False
+    now = datetime.now()
+
+    for post in latest_posts:
+        is_recent = (now - post['dt_obj'].replace(tzinfo=None)) < timedelta(hours=48) if post['dt_obj'] != datetime.min else True
+
+        if post['link'] not in sent_posts:
+            if is_recent:
+                send_telegram_notification(post['subject_name'], post['title'], post['link'])
+            sent_posts.add(post['link'])
+            new_sent = True
+
+    if new_sent:
+        save_sent_posts(sent_posts)
+
+    return tracked_subjects, latest_posts
+
+
 @app.route('/')
 def index():
-    tracked_subjects = load_subjects()
+    tracked_subjects, latest_posts = process_and_notify()
     available_subjects = get_all_available_subjects()
-    
-    all_posts = []
-    for subject in tracked_subjects:
-        posts = fetch_subject_feed(subject['id'])
-        for post in posts:
-            post['subject_name'] = subject['name']
-            all_posts.append(post)
-            
-    # Sortiramo objave od najnovije ka najstarijoj
-    all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
-    latest_posts = all_posts[:5]
-    
-    sent_posts = load_sent_posts()
-    new_sent = False
-    
-    # Za poređenje sa trenutnim vremenom
-    now = datetime.now()
 
-    for post in latest_posts:
-        # Poveravamo da li je objava nastala u poslednjih 48 sati
-        is_recent = (now - post['dt_obj'].replace(tzinfo=None)) < timedelta(hours=48) if post['dt_obj'] != datetime.min else False
-
-        if post['link'] not in sent_posts:
-            if is_recent:
-                # Šaljemo na Telegram samo ako je objava stvarno nova i mlađa od 48h
-                send_telegram_notification(post['subject_name'], post['title'], post['link'])
-            
-            # Svakako beležimo objavu u sent_posts da se ne provera ponovo
-            sent_posts.add(post['link'])
-            new_sent = True
-            
-    if new_sent:
-        save_sent_posts(sent_posts)
-    
     return render_template(
-        'index.html', 
-        subjects=tracked_subjects, 
-        available_subjects=available_subjects, 
+        'index.html',
+        subjects=tracked_subjects,
+        available_subjects=available_subjects,
         posts=latest_posts
     )
+
+
 @app.route('/cron')
 def cron_check():
-    # Pokreće istu logiku provere obaveštenja
-    tracked_subjects = load_subjects()
-    all_posts = []
-    
-    for subject in tracked_subjects:
-        posts = fetch_subject_feed(subject['id'])
-        for post in posts:
-            post['subject_name'] = subject['name']
-            all_posts.append(post)
-            
-    all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
-    latest_posts = all_posts[:5]
-    
-    sent_posts = load_sent_posts()
-    new_sent = False
-    now = datetime.now()
-
-    for post in latest_posts:
-        is_recent = (now - post['dt_obj'].replace(tzinfo=None)) < timedelta(hours=48) if post['dt_obj'] != datetime.min else False
-
-        if post['link'] not in sent_posts:
-            if is_recent:
-                send_telegram_notification(post['subject_name'], post['title'], post['link'])
-            sent_posts.add(post['link'])
-            new_sent = True
-            
-    if new_sent:
-        save_sent_posts(sent_posts)
-        
-    # Vraća minimalan JSON odgovor od svega par bajtova
+    """Lagana ruta za cron-job.org bez vraćanja velikog HTML-a"""
+    process_and_notify()
     return jsonify({"status": "ok", "message": "Check complete"}), 200
+
 
 @app.route('/add', methods=['POST'])
 def add_subject():
     data = request.json
     subject_id = int(data.get('id'))
     name = data.get('name')
-    
+
     subjects = load_subjects()
     if not any(s['id'] == subject_id for s in subjects):
         subjects.append({"id": subject_id, "name": name})
         save_subjects(subjects)
-        
+
     return jsonify({"status": "success"})
 
 
@@ -250,11 +288,11 @@ def add_subject():
 def remove_subject():
     data = request.json
     subject_id = int(data.get('id'))
-    
+
     subjects = load_subjects()
     subjects = [s for s in subjects if s['id'] != subject_id]
     save_subjects(subjects)
-    
+
     return jsonify({"status": "success"})
 
 
