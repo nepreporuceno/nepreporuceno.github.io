@@ -175,11 +175,9 @@ def fetch_subject_feed(subject_id):
     return entries
 
 
-def check_fluidi_site_change(force_report=False):
+def check_fluidi_site_change():
     url = "https://fluidi.mas.bg.ac.rs/mfb/index.html"
     headers = {'User-Agent': 'Mozilla/5.0'}
-    changed = False
-    
     try:
         response = requests.get(url, headers=headers, timeout=8)
         response.encoding = 'utf-8'
@@ -196,22 +194,17 @@ def check_fluidi_site_change(force_report=False):
             if saved_hash is None:
                 with open(FLUIDI_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
-            elif saved_hash != current_hash or force_report:
-                if not force_report:
-                    send_telegram_notification("Katedra za fluide", "Izvršena je izmena na sajtu katedre!", url)
-                changed = True
+            elif saved_hash != current_hash:
+                send_telegram_notification("Katedra za fluide", "Izvršena je izmena na sajtu katedre!", url)
                 with open(FLUIDI_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
     except Exception as e:
         print(f"Greška pri proveri Fluidi sajta: {e}")
-    return changed, url
 
 
-def check_tehnologija_site_change(force_report=False):
+def check_tehnologija_site_change():
     url = "https://cent.mas.bg.ac.rs/tehnologija-masinske-obrade/obavestenja/#title"
     headers = {'User-Agent': 'Mozilla/5.0'}
-    changed = False
-    
     try:
         response = requests.get(url, headers=headers, timeout=8)
         response.encoding = 'utf-8'
@@ -228,71 +221,43 @@ def check_tehnologija_site_change(force_report=False):
             if saved_hash is None:
                 with open(TEHNOLOGIJA_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
-            elif saved_hash != current_hash or force_report:
-                if not force_report:
-                    send_telegram_notification("Tehnologija mašinske obrade", "Izvršena je izmena na sajtu obaveštenja!", url)
-                changed = True
+            elif saved_hash != current_hash:
+                send_telegram_notification("Tehnologija mašinske obrade", "Izvršena je izmena na sajtu obaveštenja!", url)
                 with open(TEHNOLOGIJA_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
     except Exception as e:
         print(f"Greška pri proveri Tehnologija sajta: {e}")
-    return changed, url
-
-
-def process_and_notify():
-    tracked_subjects = load_subjects()
-    all_posts = []
-
-    for subject in tracked_subjects:
-        posts = fetch_subject_feed(subject['id'])
-        for post in posts:
-            post['subject_name'] = subject['name']
-            all_posts.append(post)
-
-    all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
-    latest_posts = all_posts[:5]
-
-    sent_posts = load_sent_posts()
-    new_sent = False
-    now = datetime.now()
-
-    for post in latest_posts:
-        is_recent = (now - post['dt_obj'].replace(tzinfo=None)) < timedelta(hours=48) if post['dt_obj'] != datetime.min else True
-
-        if post['link'] not in sent_posts:
-            if is_recent:
-                send_telegram_notification(post['subject_name'], post['title'], post['link'])
-            sent_posts.add(post['link'])
-            new_sent = True
-
-    if new_sent:
-        save_sent_posts(sent_posts)
-
-    check_fluidi_site_change()
-    check_tehnologija_site_change()
-
-    return tracked_subjects, latest_posts
-
-
-@app.route('/')
-def index():
-    tracked_subjects, latest_posts = process_and_notify()
-    available_subjects = get_all_available_subjects()
-
-    return render_template(
-        'index.html',
-        subjects=tracked_subjects,
-        available_subjects=available_subjects,
-        posts=latest_posts
-    )
 
 
 @app.route('/cron')
 def cron_check():
-    process_and_notify()
-    return jsonify({"status": "ok", "message": "Check complete"}), 200
+    """Ultra-lagana ruta koja ne vraća nikakav suvišan tekst"""
+    tracked_subjects = load_subjects()
+    
+    # Samo tiha provera foruma i slanje notifikacija za nove postove
+    for subject in tracked_subjects:
+        posts = fetch_subject_feed(subject['id'])
+        sent_posts = load_sent_posts()
+        new_sent = False
+        now = datetime.now()
+        
+        for post in posts[:3]: # Proverava samo top 3 najnovija radi brzine
+            is_recent = (now - post['dt_obj'].replace(tzinfo=None)) < timedelta(hours=48) if post['dt_obj'] != datetime.min else True
+            if post['link'] not in sent_posts:
+                if is_recent:
+                    send_telegram_notification(subject['name'], post['title'], post['link'])
+                sent_posts.add(post['link'])
+                new_sent = True
+        
+        if new_sent:
+            save_sent_posts(sent_posts)
 
+    # Tiha provera spoljnih sajtova
+    check_fluidi_site_change()
+    check_tehnologija_site_change()
 
+    # Vraća isključivo minimalni JSON od 12 karaktera da cron-job.org nikad ne prikaže grešku
+    return '{"status":"ok"}', 200
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     """Prima poruke od Telegrama kada mu pošalješ poruku u čet"""
