@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import hashlib
 import requests
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
@@ -13,6 +14,8 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, 'tracked_subjects.json')
 SENT_FILE = os.path.join(BASE_DIR, 'sent_posts.json')
+FLUIDI_HASH_FILE = os.path.join(BASE_DIR, 'fluidi_hash.json')
+TEHNOLOGIJA_HASH_FILE = os.path.join(BASE_DIR, 'tehnologija_hash.json')
 
 # Učitavanje Telegram podataka iz Render Environment Variables
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -63,7 +66,7 @@ def send_telegram_notification(subject_name, title, link):
         print("TELEGRAM_BOT_TOKEN ili TELEGRAM_CHAT_ID nisu podešeni u Environment Variables!")
         return
         
-    message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori obaveštenje]({link})"
+    message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori link]({link})"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
     payload = {
@@ -154,83 +157,93 @@ def fetch_subject_feed(subject_id):
     return entries
 
 
-def fetch_fluidi_posts():
-    """Funkcija za skrejpovanje obaveštenja sa sajta Katedre za fluide"""
+def check_fluidi_site_change():
+    """Proverava izmene na sajtu Katedre za fluide"""
     url = "https://fluidi.mas.bg.ac.rs/mfb/index.html"
     headers = {'User-Agent': 'Mozilla/5.0'}
-    entries = []
-
+    
     try:
         response = requests.get(url, headers=headers, timeout=8)
         response.encoding = 'utf-8'
         if response.status_code == 200:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            rows = soup.find_all('tr')
-
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 2:
-                    date_text = cols[0].get_text(strip=True)
-                    text_col = cols[1]
-
-                    link_tag = text_col.find('a')
-                    title = text_col.get_text(strip=True)
-                    
-                    if link_tag and link_tag.get('href'):
-                        href = link_tag['href']
-                        if href.startswith('http'):
-                            link = href
-                        else:
-                            link = f"https://fluidi.mas.bg.ac.rs/mfb/{href}"
-                    else:
-                        link = f"{url}#{hash(title)}"
-
-                    dt_obj = datetime.min
-                    match = re.search(r'(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})', date_text)
-                    if match:
-                        day, month, year = match.groups()
-                        if len(year) == 2:
-                            year = "20" + year
-                        try:
-                            dt_obj = datetime(int(year), int(month), int(day))
-                        except ValueError:
-                            dt_obj = datetime.min
-
-                    if title:
-                        entries.append({
-                            'title': title,
-                            'link': link,
-                            'updated': date_text if date_text else 'Sveže',
-                            'dt_obj': dt_obj,
-                            'subject_name': 'Katedra za fluide'
-                        })
+            current_hash = hashlib.md5(response.text.encode('utf-8')).hexdigest()
+            
+            saved_hash = None
+            if os.path.exists(FLUIDI_HASH_FILE):
+                try:
+                    with open(FLUIDI_HASH_FILE, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        saved_hash = data.get('hash')
+                except Exception:
+                    pass
+            
+            if saved_hash is None:
+                with open(FLUIDI_HASH_FILE, 'w', encoding='utf-8') as f:
+                    json.dump({'hash': current_hash}, f)
+            elif saved_hash != current_hash:
+                send_telegram_notification(
+                    "Katedra za fluide", 
+                    "Izvršena je izmena na sajtu katedre!", 
+                    url
+                )
+                with open(FLUIDI_HASH_FILE, 'w', encoding='utf-8') as f:
+                    json.dump({'hash': current_hash}, f)
     except Exception as e:
-        print(f"Greška pri preuzimanju vesti sa Fluidi sajta: {e}")
+        print(f"Greška pri proveri Fluidi sajta: {e}")
 
-    return entries
+
+def check_tehnologija_site_change():
+    """Proverava izmene na sajtu Tehnologije mašinske obrade"""
+    url = "https://cent.mas.bg.ac.rs/tehnologija-masinske-obrade/obavestenja/#title"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=8)
+        response.encoding = 'utf-8'
+        if response.status_code == 200:
+            current_hash = hashlib.md5(response.text.encode('utf-8')).hexdigest()
+            
+            saved_hash = None
+            if os.path.exists(TEHNOLOGIJA_HASH_FILE):
+                try:
+                    with open(TEHNOLOGIJA_HASH_FILE, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        saved_hash = data.get('hash')
+                except Exception:
+                    pass
+            
+            if saved_hash is None:
+                with open(TEHNOLOGIJA_HASH_FILE, 'w', encoding='utf-8') as f:
+                    json.dump({'hash': current_hash}, f)
+            elif saved_hash != current_hash:
+                send_telegram_notification(
+                    "Tehnologija mašinske obrade", 
+                    "Izvršena je izmena na sajtu obaveštenja!", 
+                    url
+                )
+                with open(TEHNOLOGIJA_HASH_FILE, 'w', encoding='utf-8') as f:
+                    json.dump({'hash': current_hash}, f)
+    except Exception as e:
+        print(f"Greška pri proveri Tehnologija sajta: {e}")
 
 
 def process_and_notify():
-    """Zajednička logika za sakupljanje vesti i slanje notifikacija"""
+    """Zajednička logika za sve provere"""
     tracked_subjects = load_subjects()
     all_posts = []
 
-    # 1. Obaveštenja sa glavnog foruma
+    # 1. Provera foruma za praćene predmete
     for subject in tracked_subjects:
         posts = fetch_subject_feed(subject['id'])
         for post in posts:
             post['subject_name'] = subject['name']
             all_posts.append(post)
 
-    # 2. Obaveštenja sa sajta Katedre za fluide
-    fluidi_posts = fetch_fluidi_posts()
-    all_posts.extend(fluidi_posts)
-
     # Sortiranje po datumu
     all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
     latest_posts = all_posts[:5]
 
-    # Provera i slanje notifikacija
+    # Provera i slanje notifikacija za forum
     sent_posts = load_sent_posts()
     new_sent = False
     now = datetime.now()
@@ -246,6 +259,10 @@ def process_and_notify():
 
     if new_sent:
         save_sent_posts(sent_posts)
+
+    # 2. Provera izmene na spoljnim sajtovima
+    check_fluidi_site_change()
+    check_tehnologija_site_change()
 
     return tracked_subjects, latest_posts
 
@@ -265,7 +282,7 @@ def index():
 
 @app.route('/cron')
 def cron_check():
-    """Lagana ruta za cron-job.org bez vraćanja velikog HTML-a"""
+    """Lagana ruta za cron-job.org"""
     process_and_notify()
     return jsonify({"status": "ok", "message": "Check complete"}), 200
 
@@ -298,3 +315,4 @@ def remove_subject():
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+    
