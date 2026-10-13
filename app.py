@@ -63,10 +63,9 @@ def save_sent_posts(sent_posts):
 def send_telegram_notification(subject_name, title, link):
     """Šalje obaveštenje na Telegram profil"""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("TELEGRAM_BOT_TOKEN ili TELEGRAM_CHAT_ID nisu podešeni u Environment Variables!")
         return
         
-    message = f"📌 *Novo obaveštenje: {subject_name}*\n\n{title}\n\n🔗 [Otvori link]({link})"
+    message = f"📌 *{subject_name}*\n\n{title}\n\n🔗 [Otvori link]({link})"
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
     payload = {
@@ -80,6 +79,25 @@ def send_telegram_notification(subject_name, title, link):
         requests.post(url, json=payload, timeout=5)
     except Exception as e:
         print(f"Greška pri slanju na Telegram: {e}")
+
+
+def send_custom_message(text_message, chat_id=None):
+    """Šalje običnu tekstualnu poruku na Telegram"""
+    target_chat = chat_id or TELEGRAM_CHAT_ID
+    if not TELEGRAM_BOT_TOKEN or not target_chat:
+        return
+        
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        'chat_id': target_chat,
+        'text': text_message,
+        'parse_mode': 'Markdown',
+        'disable_web_page_preview': True
+    }
+    try:
+        requests.post(url, json=payload, timeout=5)
+    except Exception as e:
+        print(f"Greška pri slanju poruke: {e}")
 
 
 def get_all_available_subjects():
@@ -157,93 +175,83 @@ def fetch_subject_feed(subject_id):
     return entries
 
 
-def check_fluidi_site_change():
-    """Proverava izmene na sajtu Katedre za fluide"""
+def check_fluidi_site_change(force_report=False):
     url = "https://fluidi.mas.bg.ac.rs/mfb/index.html"
     headers = {'User-Agent': 'Mozilla/5.0'}
+    changed = False
     
     try:
         response = requests.get(url, headers=headers, timeout=8)
         response.encoding = 'utf-8'
         if response.status_code == 200:
             current_hash = hashlib.md5(response.text.encode('utf-8')).hexdigest()
-            
             saved_hash = None
             if os.path.exists(FLUIDI_HASH_FILE):
                 try:
                     with open(FLUIDI_HASH_FILE, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        saved_hash = data.get('hash')
+                        saved_hash = json.load(f).get('hash')
                 except Exception:
                     pass
             
             if saved_hash is None:
                 with open(FLUIDI_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
-            elif saved_hash != current_hash:
-                send_telegram_notification(
-                    "Katedra za fluide", 
-                    "Izvršena je izmena na sajtu katedre!", 
-                    url
-                )
+            elif saved_hash != current_hash or force_report:
+                if not force_report:
+                    send_telegram_notification("Katedra za fluide", "Izvršena je izmena na sajtu katedre!", url)
+                changed = True
                 with open(FLUIDI_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
     except Exception as e:
         print(f"Greška pri proveri Fluidi sajta: {e}")
+    return changed, url
 
 
-def check_tehnologija_site_change():
-    """Proverava izmene na sajtu Tehnologije mašinske obrade"""
+def check_tehnologija_site_change(force_report=False):
     url = "https://cent.mas.bg.ac.rs/tehnologija-masinske-obrade/obavestenja/#title"
     headers = {'User-Agent': 'Mozilla/5.0'}
+    changed = False
     
     try:
         response = requests.get(url, headers=headers, timeout=8)
         response.encoding = 'utf-8'
         if response.status_code == 200:
             current_hash = hashlib.md5(response.text.encode('utf-8')).hexdigest()
-            
             saved_hash = None
             if os.path.exists(TEHNOLOGIJA_HASH_FILE):
                 try:
                     with open(TEHNOLOGIJA_HASH_FILE, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        saved_hash = data.get('hash')
+                        saved_hash = json.load(f).get('hash')
                 except Exception:
                     pass
             
             if saved_hash is None:
                 with open(TEHNOLOGIJA_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
-            elif saved_hash != current_hash:
-                send_telegram_notification(
-                    "Tehnologija mašinske obrade", 
-                    "Izvršena je izmena na sajtu obaveštenja!", 
-                    url
-                )
+            elif saved_hash != current_hash or force_report:
+                if not force_report:
+                    send_telegram_notification("Tehnologija mašinske obrade", "Izvršena je izmena na sajtu obaveštenja!", url)
+                changed = True
                 with open(TEHNOLOGIJA_HASH_FILE, 'w', encoding='utf-8') as f:
                     json.dump({'hash': current_hash}, f)
     except Exception as e:
         print(f"Greška pri proveri Tehnologija sajta: {e}")
+    return changed, url
 
 
 def process_and_notify():
-    """Zajednička logika za sve provere"""
     tracked_subjects = load_subjects()
     all_posts = []
 
-    # 1. Provera foruma za praćene predmete
     for subject in tracked_subjects:
         posts = fetch_subject_feed(subject['id'])
         for post in posts:
             post['subject_name'] = subject['name']
             all_posts.append(post)
 
-    # Sortiranje po datumu
     all_posts.sort(key=lambda x: x['dt_obj'], reverse=True)
     latest_posts = all_posts[:5]
 
-    # Provera i slanje notifikacija za forum
     sent_posts = load_sent_posts()
     new_sent = False
     now = datetime.now()
@@ -260,7 +268,6 @@ def process_and_notify():
     if new_sent:
         save_sent_posts(sent_posts)
 
-    # 2. Provera izmene na spoljnim sajtovima
     check_fluidi_site_change()
     check_tehnologija_site_change()
 
@@ -282,9 +289,71 @@ def index():
 
 @app.route('/cron')
 def cron_check():
-    """Lagana ruta za cron-job.org"""
     process_and_notify()
     return jsonify({"status": "ok", "message": "Check complete"}), 200
+
+
+@app.route('/webhook', methods=['POST'])
+def telegram_webhook():
+    """Prima poruke od Telegrama kada mu pošalješ poruku u čet"""
+    data = request.json
+    if data and 'message' in data:
+        message = data['message']
+        chat_id = message['chat']['id']
+        text = message.get('text', '').strip().lower()
+        
+        # Ako mu pošalješ "proveri" ili bilo šta, poslaće ti poslednje objave i stanje sajtova
+        if text:
+            tracked_subjects = load_subjects()
+            report = "🔄 *Ručna provera svih izvora:*\n\n"
+            
+            # 1. Poslednje sa foruma
+            for subject in tracked_subjects:
+                posts = fetch_subject_feed(subject['id'])
+                if posts:
+                    latest = posts[0]
+                    report += f"📚 *{subject['name']}*\n• [{latest['title']}]({latest['link']})\n\n"
+            
+            # 2. Stanje spoljnih sajtova sa linkovima
+            fluidi_changed, fluidi_url = check_fluidi_site_change(force_report=True)
+            tehn_changed, tehn_url = check_tehnologija_site_change(force_report=True)
+            
+            report += f"🔗 *Katedra za fluide:*\n{fluidi_url}\n\n"
+            report += f"🔗 *Tehnologija mašinske obrade:*\n{tehn_url}"
+            
+            send_custom_message(report, chat_id=chat_id)
+            
+    return jsonify({"status": "ok"}), 200
+
+
+@app.route('/add', methods=['POST'])
+def add_subject():
+    data = request.json
+    subject_id = int(data.get('id'))
+    name = data.get('name')
+
+    subjects = load_subjects()
+    if not any(s['id'] == subject_id for s in subjects):
+        subjects.append({"id": subject_id, "name": name})
+        save_subjects(subjects)
+
+    return jsonify({"status": "success"})
+
+
+@app.route('/remove', methods=['POST'])
+def remove_subject():
+    data = request.json
+    subject_id = int(data.get('id'))
+
+    subjects = load_subjects()
+    subjects = [s for s in subjects if s['id'] != subject_id]
+    save_subjects(subjects)
+
+    return jsonify({"status": "success"})
+
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
 
 
 @app.route('/add', methods=['POST'])
